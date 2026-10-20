@@ -228,12 +228,45 @@ test('list joins the archive set with its workspace and metadata', async () => {
     const result = await manager.list()
     assert.equal(result.ok, true)
     assert.equal(result.archived.length, 2)
-    assert.equal(result.archived[0].title, '归档的对话')
-    assert.equal(result.archived[0].workspaceTitle, 'demo')
-    assert.equal(result.archived[0].messages, 2)
-    assert.equal(result.archived[0].sizeBytes, 2048)
-    assert.equal(result.archived[1].missing, true, 'a dangling archive id is still listed')
+    const row = result.archived.find((entry) => entry.id === 'session-a')
+    assert.equal(row.title, '归档的对话')
+    assert.equal(row.workspaceTitle, 'demo')
+    assert.equal(row.messages, 2)
+    assert.equal(row.sizeBytes, 2048)
+    assert.equal(result.archived[0].missing, true, 'a dangling archive id is still listed')
     assert.equal(result.counts.bytes, 2048)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('list reports the newest archive first', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dcm-order-'))
+  try {
+    // The registry appends on archive and never reorders, so this array is the
+    // archive history: `oldest`, then `middle`, then `newest`.
+    const archived = ['session-oldest', 'session-middle', 'session-newest']
+    const store = new Map(
+      archived.map((id) => [id, { header: { id, createdAt: 1 }, events: [event('session/title', { title: id }, 1)] }]),
+    )
+    const manager = createSessionManager(
+      fakeContext({ persistence: fakePersistence(root, store), registry: fakeRegistry([...archived], []), live: { get: () => undefined } }),
+      { releaseWaitMs: 50 },
+    )
+
+    const result = await manager.list()
+    assert.deepEqual(result.archived.map((row) => row.id), ['session-newest', 'session-middle', 'session-oldest'])
+
+    // Re-archiving appends again, so a restored-then-archived session leads.
+    const again = createSessionManager(
+      fakeContext({
+        persistence: fakePersistence(root, store),
+        registry: fakeRegistry([...archived.filter((id) => id !== 'session-oldest'), 'session-oldest'], []),
+        live: { get: () => undefined },
+      }),
+      { releaseWaitMs: 50 },
+    )
+    assert.equal((await again.list()).archived[0].id, 'session-oldest')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -109,7 +109,7 @@ ${css}
     <ul class="dcm-list">
 ${rows.map(row).join('\n')}
     </ul>
-    <p class="dcm-foot">共 9 个归档对话 · 1.8 MB</p>
+    <p class="dcm-foot">共 9 个归档对话 · 1.8 MB · 最近归档在前</p>
   </div>
 </div>
 </body>

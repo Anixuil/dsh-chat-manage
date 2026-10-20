@@ -383,7 +383,14 @@ export function createSessionManager(ctx, options = {}) {
   }
 
   /**
-   * The archived set, joined with the workspace that accounts for each id.
+   * The archived set, newest archive first, joined with the workspace that
+   * accounts for each id.
+   *
+   * The registry appends to `archivedSessionIds` on every archive and never
+   * reorders it, so the array *is* archive order — oldest first. The page wants
+   * the opposite, and reversing the array is exact: no timestamp is stored per
+   * archive entry, and re-archiving a session moves it to the end, which is
+   * precisely "archived most recently".
    *
    * The registry lists workspaces in display order and each entity's `sessionIds`
    * is already filtered by session existence, so a workspace name is only a
@@ -395,7 +402,7 @@ export function createSessionManager(ctx, options = {}) {
     if (persistence === undefined) {
       return { ok: false, error: { code: 'no-persistence', message: 'session persistence is not mounted' }, archived: [], workspaces: [] }
     }
-    const archivedIds = Array.isArray(registry?.archivedSessionIds) ? registry.archivedSessionIds : []
+    const archivedIds = Array.isArray(registry?.archivedSessionIds) ? [...registry.archivedSessionIds].reverse() : []
     const workspaces = (registry?.list?.() ?? []).map((entity) => ({
       workspaceId: String(entity.id),
       title: typeof entity.title === 'string' ? entity.title : '',

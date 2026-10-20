@@ -199,6 +199,26 @@ test('GET /api/list answers with the archived set', async () => {
   }
 })
 
+test('GET /api/list hands the page the newest archive first', async () => {
+  const fx = await fixture('dcm-http-order-')
+  fx.store.set('session-b', {
+    header: { id: 'session-b', cwd: 'C:/work/demo', createdAt: 200 },
+    events: [event('session/title', { title: '后来的对话' }, 1)],
+  })
+  const server = await boot({
+    persistence: fakePersistence(fx.root, fx.store),
+    registry: fakeRegistry(['session-a', 'session-b'], []),
+    live: { get: () => undefined },
+  })
+  try {
+    const body = await (await fetch(`${server.base}${PREFIX}/api/list`)).json()
+    assert.deepEqual(body.archived.map((row) => row.id), ['session-b', 'session-a'], 'archive order is reversed for display')
+  } finally {
+    await server.close()
+    await rm(fx.root, { recursive: true, force: true })
+  }
+})
+
 test('GET /api/transcript renders one conversation', async () => {
   const fx = await fixture('dcm-http-preview-')
   const server = await boot({ persistence: fakePersistence(fx.root, fx.store), registry: fx.registry, live: { get: () => undefined } })
