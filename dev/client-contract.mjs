@@ -140,7 +140,7 @@ await check('apply registers the menu row, the dialog and the settings page', as
   assert.equal(byName.get('sidebar.workspaces.session.menu.item').options.id, 'chat-manage-delete')
   assert.equal(byName.get('sidebar.workspaces.session.menu.item').options.locale, 'chatManage')
   assert.equal(byName.get('settings.section').options.id, 'session-manage')
-  assert.equal(byName.get('settings.section').options.order, 12)
+  assert.equal(byName.get('settings.section').options.order, 5, 'sorts between 通用 (0) and 模型 (10)')
   assert.equal(typeof byName.get('settings.section').options.label, 'function')
   assert.equal(byName.get('shell.overlay').options.id, 'chat-manage-delete-confirm')
   for (const entry of registrations) assert.equal(typeof entry.component, 'function', `${entry.options.name} has a component`)

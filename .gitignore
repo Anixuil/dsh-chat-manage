@@ -7,3 +7,6 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# 本地工具产生的项目数据
+.workbuddy/

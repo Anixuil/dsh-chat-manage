@@ -46,11 +46,11 @@ _ModuleLoader__.load({
     /** Root overlay layer for dialogs that outlive their trigger. */
     const OVERLAY_SLOT = 'shell.overlay'
 
-    /** Navigation entry id. Sorts after 通用 (0), 模型 (10), 插件 (15). */
+    /** Navigation entry id. Sorts after 通用 (0), before 模型 (10) and 插件 (15). */
     const SECTION_ID = 'session-manage'
 
-    /** Sorts 会话管理 between 模型 and 插件, where data concerns belong. */
-    const SECTION_ORDER = 12
+    /** Sorts 会话管理 right after 通用: both are housekeeping, not configuration. */
+    const SECTION_ORDER = 5
 
     /** Menu row id and order: last, because it is the destructive one. */
     const MENU_ID = 'chat-manage-delete'
