@@ -204,6 +204,22 @@ await check('a batch request keeps one entry per id and ignores empty input', as
   assert.deepEqual(overlayFace.hooks.deleteRequest.getSnapshot().ids, ['a', 'b'])
 })
 
+await check('every class the components use exists in the stylesheet', async () => {
+  const open = 'const CSS = `'
+  const from = source.indexOf(open) + open.length
+  const css = source.slice(from, source.indexOf('`', from))
+  // Drop the stylesheet itself, then read every `dcm-*` token the code mentions.
+  // Both directions matter: a class with no rule renders unstyled (the list once
+  // collapsed because a wrapper had none), and a rule with no class is dead CSS.
+  const code = source.slice(0, from) + source.slice(from + css.length)
+  const used = new Set()
+  for (const match of code.matchAll(/'([^']*\bdcm-[^']*)'/g)) {
+    for (const name of match[1].split(/\s+/)) if (name.startsWith('dcm-')) used.add(name)
+  }
+  const defined = new Set([...css.matchAll(/\.(dcm-[a-z0-9-]+)/g)].map((match) => match[1]))
+  assert.deepEqual([...used].sort(), [...defined].sort(), 'used and styled class names must match exactly')
+})
+
 if (failed > 0) {
   console.error(`\n${failed} contract check(s) failed`)
   process.exitCode = 1

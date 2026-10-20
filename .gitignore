@@ -10,3 +10,7 @@ Thumbs.db
 
 # 本地工具产生的项目数据
 .workbuddy/
+
+# 布局预览的生成产物（`npm run layout` 随时重建）
+dev/preview.html
+dev/preview.png

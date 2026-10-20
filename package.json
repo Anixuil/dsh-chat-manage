@@ -24,7 +24,8 @@
     "test": "node dev/smoke.mjs && node dev/http.mjs && node dev/client-contract.mjs",
     "smoke": "node dev/smoke.mjs",
     "http": "node dev/http.mjs",
-    "contract": "node dev/client-contract.mjs"
+    "contract": "node dev/client-contract.mjs",
+    "layout": "node dev/layout.mjs"
   },
   "exports": {
     ".": "./index.js",

@@ -140,13 +140,15 @@ npm test          # 三套自测，全部离线，不碰真实数据
 npm run smoke     # 只跑 Host 逻辑单测
 npm run http      # 只跑 HTTP 路由集成
 npm run contract  # 只跑浏览器半契约
+npm run layout    # 生成 dev/preview.html，用真实样式表看窄面板下的排版
 ```
 
 - `dev/smoke.mjs` — 纯逻辑单测（16 项）：id 规范化、内容折叠、标题提取与回退、注入上下文过滤、列表与 workspace 关联、截断、删除（含 `running` / `in-use` / 工件缺失拒绝）、恢复、服务缺失降级。
 - `dev/http.mjs` — 路由集成测试（9 项）：真起一个 `http.Server`，把插件挂上去，然后用 `fetch` 打四个路由。校验状态码、JSON 结构、`no-store` 头、空 id 与缺 id 的拒绝、配置项对预览窗口的约束，以及 fiber 释放后路由确实被卸载。
-- `dev/client-contract.mjs` — 浏览器半契约测试（5 项）：用 `new Function` 复现 shell 的加载方式，校验包名注册、三个 slot 的 id/order/label、菜单面能唤起弹层请求、设置面暴露的方法齐全。
+- `dev/client-contract.mjs` — 浏览器半契约测试（6 项）：复现 shell 的加载方式，校验包名注册、三个 slot 的 id/order/label、菜单面能唤起弹层请求、设置面暴露的方法齐全，以及**组件用到的 `dcm-*` 类名与样式表里的规则必须一一对应**（反向也查：没有死 CSS）。
+- `dev/layout.mjs` — 排版夹具：把 `client.js` 里的样式表原样抽出来，按组件同样的 DOM 结构在 470px 宽度下渲染成 `dev/preview.html`。设置面板只有这么宽，列表挤爆过一次（标题列被压成 0、操作列溢出），这类问题看代码看不出来。
 
-三套都只读 `node:` 内置模块和假对象，不需要 DSH 在跑。
+前三套都只读 `node:` 内置模块和假对象，不需要 DSH 在跑；`layout.mjs` 只是生成一个静态页，用浏览器或截图看即可。
 
 ## 装完怎么确认
 

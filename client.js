@@ -78,14 +78,10 @@ window.__ModuleLoader__.load({
       emptyFiltered: '没有匹配的归档对话。',
       loadFailed: '读取失败：{msg}',
       columnTitle: '对话',
-      columnWorkspace: '工作区',
-      columnUpdated: '更新时间',
-      columnSize: '大小',
       columnActions: '操作',
       view: '查看',
       restore: '恢复',
       delete: '删除',
-      restoreOne: '恢复',
       cleanup: '清理记录',
       unassigned: '未归属工作区',
       missing: '记录缺失',
@@ -98,14 +94,12 @@ window.__ModuleLoader__.load({
       confirmCancel: '取消',
       confirmDelete: '删除',
       confirmBusy: '删除中…',
-      confirmDone: '已删除 {n} 个对话。',
       confirmPartial: '{ok} 个已删除，{failed} 个未删除。',
       failureRunning: '这个对话正在运行，请先停止再删除。',
       failureInUse: '这个对话正在打开，请先切换到其他对话再删除。',
       failureGeneric: '删除失败：{msg}',
       restoreDone: '已恢复 {n} 个对话。',
       restoreFailed: '恢复失败：{msg}',
-      busy: '处理中…',
       close: '关闭',
       previewTitle: '对话内容',
       previewEmpty: '这个对话还没有可以显示的消息。',
@@ -137,14 +131,10 @@ window.__ModuleLoader__.load({
       emptyFiltered: 'No archived conversation matches that search.',
       loadFailed: 'Could not read the archive: {msg}',
       columnTitle: 'Conversation',
-      columnWorkspace: 'Workspace',
-      columnUpdated: 'Updated',
-      columnSize: 'Size',
       columnActions: 'Actions',
       view: 'View',
       restore: 'Restore',
       delete: 'Delete',
-      restoreOne: 'Restore',
       cleanup: 'Drop entry',
       unassigned: 'No workspace',
       missing: 'Log missing',
@@ -157,14 +147,12 @@ window.__ModuleLoader__.load({
       confirmCancel: 'Cancel',
       confirmDelete: 'Delete',
       confirmBusy: 'Deleting…',
-      confirmDone: 'Deleted {n} conversation(s).',
       confirmPartial: '{ok} deleted, {failed} kept.',
       failureRunning: 'This conversation is still running; stop it first.',
       failureInUse: 'This conversation is still open; switch to another one first.',
       failureGeneric: 'Delete failed: {msg}',
       restoreDone: 'Restored {n} conversation(s).',
       restoreFailed: 'Restore failed: {msg}',
-      busy: 'Working…',
       close: 'Close',
       previewTitle: 'Conversation',
       previewEmpty: 'This conversation has no messages to show.',
@@ -182,29 +170,33 @@ window.__ModuleLoader__.load({
 .dcm-section{display:flex;flex-direction:column;gap:12px;max-width:820px;color:var(--dsw-alias-label-primary)}
 .dcm-heading{margin:0;font-size:18px;font-weight:600}
 .dcm-intro{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}
-.dcm-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.dcm-search{flex:1 1 220px;min-width:160px;padding:7px 10px;font:inherit;font-size:13px;color:var(--dsw-alias-label-primary);background:transparent;border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none}
+.dcm-toolbar{display:flex;flex-direction:column;gap:8px}
+.dcm-toolbar-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;justify-content:flex-end}
+.dcm-search{box-sizing:border-box;width:100%;padding:7px 10px;font:inherit;font-size:13px;color:var(--dsw-alias-label-primary);background:transparent;border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none}
 .dcm-search:focus{border-color:var(--dsw-alias-state-business-primary)}
-.dcm-toolbar-spacer{flex:1 1 auto}
-.dcm-btn{font:inherit;font-size:13px;line-height:20px;padding:6px 12px;border-radius:8px;cursor:pointer;color:var(--dsw-alias-label-primary);background:transparent;border:.5px solid var(--dsw-alias-border-l2)}
+.dcm-btn{font:inherit;font-size:13px;line-height:20px;padding:6px 12px;border-radius:8px;cursor:pointer;white-space:nowrap;color:var(--dsw-alias-label-primary);background:transparent;border:.5px solid var(--dsw-alias-border-l2)}
 .dcm-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dcm-btn:disabled{opacity:.5;cursor:default}
 .dcm-btn-danger{color:var(--dsw-alias-label-error);border-color:var(--dsw-alias-border-l2)}
 .dcm-btn-danger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}
-.dcm-head{display:grid;grid-template-columns:26px minmax(0,1fr) 150px 120px 84px 132px;gap:10px;padding:0 10px 6px;font-size:12px;color:var(--dsw-alias-label-tertiary);border-bottom:.5px solid var(--dsw-alias-border-l2)}
+.dcm-head{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;padding:0 10px 6px;font-size:12px;color:var(--dsw-alias-label-tertiary);border-bottom:.5px solid var(--dsw-alias-border-l2)}
+.dcm-head-actions{text-align:right;white-space:nowrap}
 .dcm-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column}
-.dcm-row{display:grid;grid-template-columns:26px minmax(0,1fr) 150px 120px 84px 132px;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;font-size:13px}
+.dcm-row{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;align-items:start;padding:8px 10px;border-radius:8px;font-size:13px}
 .dcm-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.dcm-check{margin:0;accent-color:var(--dsw-alias-state-business-primary);cursor:pointer}
+.dcm-check{margin:2px 0 0;accent-color:var(--dsw-alias-state-business-primary);cursor:pointer}
+.dcm-main{display:flex;flex-direction:column;gap:3px;min-width:0}
 .dcm-title{min-width:0;text-align:left;font:inherit;font-size:13px;color:var(--dsw-alias-label-primary);background:none;border:0;padding:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dcm-title:hover{text-decoration:underline}
 .dcm-title[data-empty="true"]{color:var(--dsw-alias-label-tertiary)}
-.dcm-cell{color:var(--dsw-alias-label-tertiary);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dcm-actions{display:flex;gap:8px;justify-content:flex-end}
-.dcm-link{font:inherit;font-size:12px;padding:0;background:none;border:0;cursor:pointer;color:var(--dsw-alias-link)}
+.dcm-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.dcm-cell{color:var(--dsw-alias-label-tertiary);font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dcm-sep{color:var(--dsw-alias-label-tertiary);font-size:12px;opacity:.55}
+.dcm-actions{display:flex;flex-wrap:nowrap;gap:10px;justify-content:flex-end;white-space:nowrap}
+.dcm-link{font:inherit;font-size:12px;padding:0;background:none;border:0;cursor:pointer;color:var(--dsw-alias-link);white-space:nowrap}
 .dcm-link:hover{text-decoration:underline}
 .dcm-link-danger{color:var(--dsw-alias-label-error)}
-.dcm-tag{display:inline-block;margin-left:6px;padding:0 6px;font-size:11px;line-height:16px;border-radius:6px;color:var(--dsw-alias-state-warn-label);background:var(--dsw-alias-state-warn-tertiary,transparent)}
+.dcm-tag{display:inline-block;padding:0 6px;font-size:11px;line-height:16px;border-radius:6px;color:var(--dsw-alias-state-warn-label);background:var(--dsw-alias-state-warn-tertiary,transparent)}
 .dcm-state{margin:0;font-size:13px;color:var(--dsw-alias-label-tertiary);padding:14px 10px}
 .dcm-error{margin:0;font-size:13px;color:var(--dsw-alias-label-error);padding:10px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover-danger,transparent)}
 .dcm-foot{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary)}
@@ -567,15 +559,17 @@ window.__ModuleLoader__.load({
           })
       }
 
+      // Two columns, not five: the settings panel is barely wider than 450px, and
+      // five fixed tracks plus gaps overflowed it — the title track collapsed to
+      // zero and the actions spilled past the edge. The workspace, time and size
+      // now sit on a second line under the title, so the row fits any width the
+      // shell hands us.
       const head = h(
         'div',
         { className: 'dcm-head' },
         h('span', null, ''),
         h('span', null, t('columnTitle')),
-        h('span', null, t('columnWorkspace')),
-        h('span', null, t('columnUpdated')),
-        h('span', null, t('columnSize')),
-        h('span', { style: { textAlign: 'right' } }, t('columnActions')),
+        h('span', { className: 'dcm-head-actions' }, t('columnActions')),
       )
 
       const body = (() => {
@@ -601,21 +595,31 @@ window.__ModuleLoader__.load({
                   'aria-label': row.title.length > 0 ? row.title : row.id,
                 }),
                 h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dcm-title',
-                    'data-empty': row.title.length > 0 ? 'false' : 'true',
-                    title: row.missing === true ? t('missingHint') : row.title,
-                    onClick: () => (row.missing === true ? undefined : openPreview(row)),
-                  },
-                  row.title.length > 0 ? row.title : row.missing === true ? t('missing') : row.id,
-                  row.missing === true ? h('span', { className: 'dcm-tag' }, t('missing')) : null,
-                  row.unsupported === true ? h('span', { className: 'dcm-tag' }, t('unsupported')) : null,
+                  'div',
+                  { className: 'dcm-main' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dcm-title',
+                      'data-empty': row.title.length > 0 ? 'false' : 'true',
+                      title: row.missing === true ? t('missingHint') : row.title,
+                      onClick: () => (row.missing === true ? undefined : openPreview(row)),
+                    },
+                    row.title.length > 0 ? row.title : row.missing === true ? t('missing') : row.id,
+                  ),
+                  h(
+                    'div',
+                    { className: 'dcm-meta' },
+                    h('span', { className: 'dcm-cell', title: row.workspaceTitle || row.cwd }, row.workspaceTitle || row.cwd || t('unassigned')),
+                    h('span', { className: 'dcm-sep' }, '·'),
+                    h('span', { className: 'dcm-cell' }, formatTime(row.updatedAt, t('never'))),
+                    h('span', { className: 'dcm-sep' }, '·'),
+                    h('span', { className: 'dcm-cell' }, formatBytes(row.sizeBytes)),
+                    row.missing === true ? h('span', { className: 'dcm-tag' }, t('missing')) : null,
+                    row.unsupported === true ? h('span', { className: 'dcm-tag' }, t('unsupported')) : null,
+                  ),
                 ),
-                h('span', { className: 'dcm-cell', title: row.workspaceTitle || row.cwd }, row.workspaceTitle || row.cwd || t('unassigned')),
-                h('span', { className: 'dcm-cell' }, formatTime(row.updatedAt, t('never'))),
-                h('span', { className: 'dcm-cell' }, formatBytes(row.sizeBytes)),
                 h(
                   'span',
                   { className: 'dcm-actions' },
@@ -718,44 +722,47 @@ window.__ModuleLoader__.load({
             value: query,
             onChange: (event) => setQuery(event.target.value),
           }),
-          h('span', { className: 'dcm-toolbar-spacer' }),
           h(
-            'button',
-            { type: 'button', className: 'dcm-btn', disabled: state.phase === 'loading', onClick: () => void reload() },
-            state.phase === 'refreshing' ? t('refreshing') : t('refresh'),
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dcm-btn',
-              disabled: busy || visible.length === 0,
-              onClick: () => setSelected(allSelected ? new Set() : new Set(visible.map((row) => row.id))),
-            },
-            allSelected ? t('clearAll') : t('selectAll'),
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dcm-btn',
-              disabled: busy || selectedIds.length === 0,
-              onClick: () => restore(selectedIds),
-            },
-            t('restoreSelected'),
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dcm-btn dcm-btn-danger',
-              disabled: busy || selectedIds.length === 0,
-              onClick: () => {
-                const single = selectedIds.length === 1 ? rows.find((row) => row.id === selectedIds[0]) : undefined
-                requestDelete(selectedIds, single?.title ?? '')
+            'div',
+            { className: 'dcm-toolbar-row' },
+            h(
+              'button',
+              { type: 'button', className: 'dcm-btn', disabled: state.phase === 'loading', onClick: () => void reload() },
+              state.phase === 'refreshing' ? t('refreshing') : t('refresh'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dcm-btn',
+                disabled: busy || visible.length === 0,
+                onClick: () => setSelected(allSelected ? new Set() : new Set(visible.map((row) => row.id))),
               },
-            },
-            t('deleteSelected'),
+              allSelected ? t('clearAll') : t('selectAll'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dcm-btn',
+                disabled: busy || selectedIds.length === 0,
+                onClick: () => restore(selectedIds),
+              },
+              t('restoreSelected'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dcm-btn dcm-btn-danger',
+                disabled: busy || selectedIds.length === 0,
+                onClick: () => {
+                  const single = selectedIds.length === 1 ? rows.find((row) => row.id === selectedIds[0]) : undefined
+                  requestDelete(selectedIds, single?.title ?? '')
+                },
+              },
+              t('deleteSelected'),
+            ),
           ),
         ),
         selectedIds.length === 0 ? null : h('p', { className: 'dcm-foot' }, format(t('selected'), { n: selectedIds.length })),
