@@ -136,14 +136,31 @@ HTTP 接口（都挂在 `/dsh-chat-manage` 下，只服务本机 web 端口）�
 ## 开发
 
 ```bash
-npm test          # 两套自测，全部离线，不碰真实数据
+npm test          # 三套自测，全部离线，不碰真实数据
 npm run smoke     # 只跑 Host 逻辑单测
+npm run http      # 只跑 HTTP 路由集成
+npm run contract  # 只跑浏览器半契约
 ```
 
-- `dev/smoke.mjs` — 纯逻辑单测（15 项）：id 规范化、内容折叠、标题提取、注入上下文过滤、列表与 workspace 关联、截断、删除（含 `running` / `in-use` / 工件缺失拒绝）、恢复、服务缺失降级。
+- `dev/smoke.mjs` — 纯逻辑单测（16 项）：id 规范化、内容折叠、标题提取与回退、注入上下文过滤、列表与 workspace 关联、截断、删除（含 `running` / `in-use` / 工件缺失拒绝）、恢复、服务缺失降级。
+- `dev/http.mjs` — 路由集成测试（9 项）：真起一个 `http.Server`，把插件挂上去，然后用 `fetch` 打四个路由。校验状态码、JSON 结构、`no-store` 头、空 id 与缺 id 的拒绝、配置项对预览窗口的约束，以及 fiber 释放后路由确实被卸载。
 - `dev/client-contract.mjs` — 浏览器半契约测试（5 项）：用 `new Function` 复现 shell 的加载方式，校验包名注册、三个 slot 的 id/order/label、菜单面能唤起弹层请求、设置面暴露的方法齐全。
 
-两套都只读 `node:` 内置模块和假对象，不需要 DSH 在跑。
+三套都只读 `node:` 内置模块和假对象，不需要 DSH 在跑。
+
+## 装完怎么确认
+
+重启后看三处：
+
+1. 侧边栏任意对话行 `...` 里多出 **删除对话**（带垃圾桶图标，红色 hover）。
+2. 设置左侧导航在「通用」和「模型」之间多出 **会话管理**。
+3. 浏览器里能打开 `http://127.0.0.1:<host 端口>/dsh-chat-manage/api/list`，返回 `{"ok":true,...}`。
+
+三个都没出现时按顺序查：
+
+- `~/.dsh/profiles/desktop/package.json` 的 `dsh.profile.bundles` 里有 `dsh-chat-manage` 吗？
+- `~/.dsh/profiles/desktop/node_modules/dsh-chat-manage/package.json` 能读到吗（联接是否建好）？
+- 是不是没重启？Host 行和 `client.js` 都是启动时加载的。
 
 ## 注意
 
