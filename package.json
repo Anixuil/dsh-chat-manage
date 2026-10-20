@@ -1,0 +1,69 @@
+{
+  "name": "dsh-chat-manage",
+  "version": "0.1.0",
+  "description": "Session housekeeping for DeepSeek Harness: delete a conversation from its sidebar menu, and browse, restore or delete archived conversations from a settings page.",
+  "license": "MIT",
+  "author": "Anixuil",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Anixuil/dsh-chat-manage.git"
+  },
+  "homepage": "https://github.com/Anixuil/dsh-chat-manage#readme",
+  "bugs": {
+    "url": "https://github.com/Anixuil/dsh-chat-manage/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "node dev/smoke.mjs && node dev/http.mjs && node dev/client-contract.mjs",
+    "smoke": "node dev/smoke.mjs",
+    "http": "node dev/http.mjs",
+    "contract": "node dev/client-contract.mjs"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "index.js",
+    "sessions.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "session",
+    "archive",
+    "delete",
+    "conversation",
+    "cleanup"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  }
+}

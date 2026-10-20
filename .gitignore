@@ -1,0 +1,9 @@
+# 本地开发依赖：跑 dev/ 下的验证套件需要，不随插件分发
+node_modules/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

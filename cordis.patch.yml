@@ -1,0 +1,22 @@
+# Bundle patch for dsh-chat-manage.
+#
+# This bundle owns exactly one Loader row, so it goes under `insert:` and
+# overrides nothing declared by another bundle. Uninstalling the package removes
+# the row with the layer, which is why there is no disable dance here.
+#
+# The row's `config` is read straight by `apply()`; the plugin ships no
+# Schemastery schema, so these keys are optional and every one of them has a
+# default in `index.js`. Tune them by editing this file (or the row in
+# `cordis.patch.yml` of the profile) and restarting the Host:
+#
+#   transcriptBlocks   how many log events one preview may render   (default 600)
+#   listCacheSeconds   how long one archived row's metadata is reused (default 15)
+#   releaseWaitMs      how long a delete waits for a live agent to let go (default 2500)
+
+- insert:
+    - id: chat-manage
+      name: dsh-chat-manage
+      config:
+        transcriptBlocks: 600
+        listCacheSeconds: 15
+        releaseWaitMs: 2500
