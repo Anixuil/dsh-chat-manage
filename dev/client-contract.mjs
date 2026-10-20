@@ -106,9 +106,13 @@ function loadClient() {
       loaded.push(entry)
     },
   }
-  // The file is a plain script from the module system's point of view: it calls
-  // the global loader and defines no exports of its own.
-  new Function('_ModuleLoader__', source)(loader)
+  // The shell installs the loader on `window` and evaluates the file as a plain
+  // script, so the file has to reach it through that global. Nothing is injected
+  // as a parameter here: a bare `_ModuleLoader__` must fail in this harness for
+  // the same reason it fails in the browser — that is the regression this check
+  // exists for.
+  globalThis.window = { __ModuleLoader__: loader }
+  new Function(source)()
   assert.equal(loaded.length, 1, 'client.js calls the module loader exactly once')
   const [entry] = loaded
   const clientModule = entry.factory((id) => {

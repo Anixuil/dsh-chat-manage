@@ -20,7 +20,7 @@
  * Plain CJS with `React.createElement` — no build step, no JSX.
  */
 
-_ModuleLoader__.load({
+window.__ModuleLoader__.load({
   id: 'dsh-chat-manage',
   factory: (require) => {
     const module = { exports: {} }
