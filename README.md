@@ -95,7 +95,7 @@ DSH 没有「删除会话」的 API，`SessionPersistence` 只提供读，`Works
 ```
 index.js       Host 半：注册 /dsh-chat-manage 前缀的 HTTP 路由
 sessions.js    纯逻辑：读事件流、折叠成对话块、按 id 清理（只依赖 node: 内置模块）
-client.js      浏览器半：菜单行、确认弹窗、设置页（_ModuleLoader__ 加载，无构建步骤）
+client.js      浏览器半：菜单行、确认弹窗、设置页（window.__ModuleLoader__ 加载，无构建步骤）
 cordis.patch.yml  Loader 行插入
 ```
 
