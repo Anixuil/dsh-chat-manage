@@ -1,6 +1,6 @@
 {
   "name": "dsh-chat-manage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Session housekeeping for DeepSeek Harness: delete a conversation from its sidebar menu, and browse, restore or delete archived conversations from a settings page.",
   "license": "MIT",
   "author": "Anixuil",

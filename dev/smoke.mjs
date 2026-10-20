@@ -340,7 +340,7 @@ test('delete removes the artifact and every registry reference', async () => {
   }
 })
 
-test('delete refuses a conversation a client still holds', async () => {
+test('delete goes ahead while the Host still holds the session', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dcm-live-'))
   try {
     const id = 'session-live'
@@ -352,11 +352,13 @@ test('delete refuses a conversation a client still holds', async () => {
       { releaseWaitMs: 120 },
     )
 
+    // Being materialized in the Host's store is not the same as being open in a
+    // view: refusing here is what made "I am not even reading it" undeletable.
     const results = await manager.remove([id])
-    assert.equal(results[0].ok, false)
-    assert.equal(results[0].code, 'in-use')
-    assert.equal(await exists(dir), true, 'nothing was removed')
-    assert.deepEqual(registry.archivedSessionIds, [id])
+    assert.equal(results[0].ok, true)
+    assert.equal(results[0].live, true, 'the caller learns the session outlived the grace window')
+    assert.equal(await exists(dir), false, 'the artifact is gone all the same')
+    assert.deepEqual(registry.archivedSessionIds, [])
   } finally {
     await rm(root, { recursive: true, force: true })
   }

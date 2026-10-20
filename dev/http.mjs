@@ -293,6 +293,28 @@ test('POST /api/delete removes the conversation and reports per id', async () =>
   }
 })
 
+test('POST /api/delete goes ahead while the Host still holds the session', async () => {
+  const fx = await fixture('dcm-http-live-')
+  const server = await boot(
+    { persistence: fakePersistence(fx.root, fx.store), registry: fx.registry, live: { get: (id) => ({ id }) } },
+    { releaseWaitMs: 60 },
+  )
+  try {
+    const response = await fetch(`${server.base}${PREFIX}/api/delete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ids: ['session-a'] }),
+    })
+    const body = await response.json()
+    assert.equal(body.results[0].ok, true, 'a materialized session is not an open one')
+    assert.equal(body.results[0].live, true, 'the caller can tell it outlived the grace window')
+    assert.equal(await exists(fx.dir), false)
+  } finally {
+    await server.close()
+    await rm(fx.root, { recursive: true, force: true })
+  }
+})
+
 test('POST /api/delete refuses an empty id list', async () => {
   const fx = await fixture('dcm-http-empty-')
   const server = await boot({ persistence: fakePersistence(fx.root, fx.store), registry: fx.registry, live: { get: () => undefined } })

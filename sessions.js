@@ -472,14 +472,15 @@ export function createSessionManager(ctx, options = {}) {
   }
 
   /**
-   * Wait for the Host to let go of one session.
+   * Give the Host a moment to let go of one session.
    *
-   * A client that still holds the conversation keeps a live agent whose next
-   * append would recreate the log we are about to remove, so the delete waits
-   * briefly instead of racing it. The caller has already been told to navigate
-   * away; this is the grace period, not a substitute for that.
+   * A live session whose next append would recreate the log we are about to
+   * remove is worth waiting for — but only briefly. Being materialized in the
+   * Host's store is **not** the same as being open in a view: the store keeps a
+   * session object after the user navigates away, which is why refusing on it
+   * locked users out of deleting conversations nobody was reading.
    * @param id - the session id.
-   * @returns whether the session is idle now.
+   * @returns whether the session was released before the deadline.
    */
   async function waitReleased(id) {
     const deadline = Date.now() + releaseWaitMs
@@ -567,9 +568,9 @@ export function createSessionManager(ctx, options = {}) {
     if (activity.length > 0) {
       return { id, ok: false, code: 'running', message: 'this conversation is still running; stop it before deleting' }
     }
-    if (!(await waitReleased(id))) {
-      return { id, ok: false, code: 'in-use', message: 'this conversation is still open; switch to another conversation and try again' }
-    }
+    // Best effort, never a refusal: see `waitReleased`. `live` in the result only
+    // tells the caller the session object outlived the grace window.
+    const released = await waitReleased(id)
 
     let header
     try {
@@ -595,7 +596,7 @@ export function createSessionManager(ctx, options = {}) {
     }
     cache.delete(id)
 
-    return { id, ok: true, removed: paths.length }
+    return released ? { id, ok: true, removed: paths.length } : { id, ok: true, removed: paths.length, live: true }
   }
 
   /**

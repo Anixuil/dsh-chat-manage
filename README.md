@@ -56,7 +56,8 @@ npm pack                 # 生成 dsh-chat-manage-0.1.0.tgz
 
 侧边栏任意对话行 → `...` → **删除对话**。确认框里会显示对话标题，并说明「聊天记录会从磁盘上删除，无法恢复」。
 
-- 删的是**当前正在查看**的对话时，插件会先切到一个新的空会话，再删除旧的那条，避免界面挂在一个已经不存在的 id 上。
+- 删的是**当前正在查看**的对话时，插件会先自动开一个新对话再删除旧的那条，不需要手动切走。
+- 就算目标对话“看起来还开着”，也不会拦你：Host 内存里留着会话对象不代表有人在看它。万一仍被拒绝，客户端会自动开新对话并重试一次。
 - 如果这条对话正被一个**还在跑**的 agent 占用，删除会被拒绝并给出提示。这是有意的：半途删掉工作目录会让运行中的会话直接报错。等它跑完再删。
 
 ### 会话管理（设置里）
@@ -79,10 +80,10 @@ npm pack                 # 生成 dsh-chat-manage-0.1.0.tgz
 DSH 没有「删除会话」的 API，`SessionPersistence` 只提供读，`WorkspaceRegistry` 只提供 archive / unarchive。所以插件自己编排删除流程：
 
 ```
-活动检查 (sessions.runState / waterfall)
-   ↓ 拒绝 running
-等 agent 释放 (轮询 sessions.get(id)，最多 releaseWaitMs)
-   ↓ 拒绝 in-use
+活动检查 (waterfall: workspace/session-activity)
+   ↓ 只有真的在跑（turn / 子代理 / 定时任务）才拒绝
+等一会儿让 Host 放掉会话对象（最多 releaseWaitMs，仅尽力而为）
+   ↓ 不等结果，照样继续
 撤登记：entity.detachSession / unarchiveSession / unpinSession
    ↓
 删工件：persistence.locate(header).path + 会话目录
@@ -92,6 +93,8 @@ DSH 没有「删除会话」的 API，`SessionPersistence` 只提供读，`Works
 ```
 
 顺序是刻意的：**先撤登记再删磁盘**。万一某一步失败，用户看到的是一个仍然可见、可以重试的行，而不是一个点不掉的幽灵 id。
+
+**关于「正在打开」**：Host 的 `sessions.get(id)` 只说明这个会话对象还在内存里，不等于用户正在看它——用户切走后对象仍会留着。所以这里不以它作为拒绝条件（早期版本这么做，导致「明明没打开也删不掉」）。真正需要保护的是**正在跑**的会话，那个会拒绝。若目标是当前屏幕上的对话，客户端会先 `startSession()` 开一个新对话再删；万一 Host 仍报 `in-use`，客户端会自动再开一次新对话并重试一遍，不会把「请先切换对话」丢给用户。
 
 ### 两个半区
 
@@ -146,9 +149,9 @@ npm run contract  # 只跑浏览器半契约
 npm run layout    # 生成 dev/preview.html，用真实样式表看窄面板下的排版
 ```
 
-- `dev/smoke.mjs` — 纯逻辑单测（16 项）：id 规范化、内容折叠、标题提取与回退、注入上下文过滤、列表与 workspace 关联、截断、删除（含 `running` / `in-use` / 工件缺失拒绝）、恢复、服务缺失降级。
-- `dev/http.mjs` — 路由集成测试（9 项）：真起一个 `http.Server`，把插件挂上去，然后用 `fetch` 打四个路由。校验状态码、JSON 结构、`no-store` 头、空 id 与缺 id 的拒绝、配置项对预览窗口的约束，以及 fiber 释放后路由确实被卸载。
-- `dev/client-contract.mjs` — 浏览器半契约测试（6 项）：复现 shell 的加载方式，校验包名注册、三个 slot 的 id/order/label、菜单面能唤起弹层请求、设置面暴露的方法齐全，以及**组件用到的 `dcm-*` 类名与样式表里的规则必须一一对应**（反向也查：没有死 CSS）。
+- `dev/smoke.mjs` — 纯逻辑单测（17 项）：id 规范化、内容折叠、标题提取与回退、注入上下文过滤、列表与 workspace 关联、截断、删除（含 running 拒绝、「仍在内存也照删」、「恢复后再归档」顺序、工件缺失清理）、恢复、服务缺失降级。
+- `dev/http.mjs` — 路由集成测试（10 项）：真起一个 `http.Server`，把插件挂上去，然后用 `fetch` 打四个路由。校验状态码、JSON 结构、`no-store` 头、空 id 与缺 id 的拒绝、配置项对预览窗口的约束，以及 fiber 释放后路由确实被卸载。
+- `dev/client-contract.mjs` — 浏览器半契约测试（8 项）：复现 shell 的加载方式，校验包名注册、三个 slot 的 id/order/label、菜单面能唤起弹层请求、设置面暴露的方法齐全，**组件用到的 `dcm-*` 类名与样式表里的规则必须一一对应**（反向也查：没有死 CSS），以及删除流程的两个顺序保证：**先导航再请求**、**被拒后自动开新对话重试一次**。
 - `dev/layout.mjs` — 排版夹具：把 `client.js` 里的样式表原样抽出来，按组件同样的 DOM 结构在 470px 宽度下渲染成 `dev/preview.html`。设置面板只有这么宽，列表挤爆过一次（标题列被压成 0、操作列溢出），这类问题看代码看不出来。
 
 前三套都只读 `node:` 内置模块和假对象，不需要 DSH 在跑；`layout.mjs` 只是生成一个静态页，用浏览器或截图看即可。

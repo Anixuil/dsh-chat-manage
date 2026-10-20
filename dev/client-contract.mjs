@@ -220,6 +220,67 @@ await check('every class the components use exists in the stylesheet', async () 
   assert.deepEqual([...used].sort(), [...defined].sort(), 'used and styled class names must match exactly')
 })
 
+await check('deleting the conversation on screen navigates away first', async () => {
+  registrations.length = 0
+  const { clientModule } = loadClient()
+  const order = []
+  clientModule.apply(fakeContext({
+    uiWorkspace: { mainReference: { sessionId: 'session-a' }, startSession: () => order.push('navigate') },
+    sessions: { refresh: async () => order.push('refresh') },
+  }))
+  const overlay = registrations.find((entry) => entry.options.name === 'shell.overlay')
+
+  const original = globalThis.fetch
+  globalThis.fetch = async (_url, init) => {
+    order.push(`delete:${JSON.parse(init.body).ids.join(',')}`)
+    return { status: 200, json: async () => ({ ok: true, results: [{ id: 'session-a', ok: true }] }) }
+  }
+  try {
+    const summary = await overlay.options.inject().confirmDelete(['session-a'])
+    assert.deepEqual(order, ['navigate', 'delete:session-a', 'refresh'], 'the client leaves before asking the Host')
+    assert.equal(summary.deleted, 1)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+await check('a refused delete opens a new conversation and retries once', async () => {
+  registrations.length = 0
+  const { clientModule } = loadClient()
+  let navigations = 0
+  clientModule.apply(fakeContext({
+    uiWorkspace: { startSession: () => { navigations += 1 } },
+    sessions: { refresh: async () => {} },
+  }))
+  const overlay = registrations.find((entry) => entry.options.name === 'shell.overlay')
+
+  const original = globalThis.fetch
+  const batches = []
+  globalThis.fetch = async (_url, init) => {
+    const ids = JSON.parse(init.body).ids
+    batches.push(ids)
+    // A host that still gates on a live session refuses the first pass.
+    const refuse = batches.length === 1
+    return {
+      status: 200,
+      json: async () => ({
+        ok: !refuse,
+        results: ids.map((id) => (refuse ? { id, ok: false, code: 'in-use', message: 'still open' } : { id, ok: true })),
+      }),
+    }
+  }
+  try {
+    const summary = await overlay.options.inject().confirmDelete(['session-a'])
+    assert.equal(batches.length, 2, 'the refused id is retried, not reported to the user')
+    assert.deepEqual(batches[1], ['session-a'])
+    assert.equal(navigations, 1, 'the retry opens a fresh conversation first')
+    assert.equal(summary.deleted, 1)
+    assert.deepEqual(summary.failed, [])
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 if (failed > 0) {
   console.error(`\n${failed} contract check(s) failed`)
   process.exitCode = 1

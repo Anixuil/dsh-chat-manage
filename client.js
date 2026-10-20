@@ -339,13 +339,20 @@ window.__ModuleLoader__.load({
     /**
      * The conversation the main view is showing right now.
      *
-     * A message deleted out from under an open conversation would leave the
-     * transcript on screen with no log behind it, so the delete path asks this
-     * first and navigates away before touching the Host.
+     * Two independent sources, because either can be absent: the retention record
+     * the workspace browser takes when it opens a session (`retainedBy.mainView`),
+     * and the browser's own `mainReference`, which also covers a blank draft that
+     * has not been retained yet.
      * @param ctx - the plugin context.
      * @returns the session id, or undefined when no conversation is retained.
      */
     function mainSessionId(ctx) {
+      try {
+        const reference = ctx.get('uiWorkspace')?.mainReference?.sessionId
+        if (typeof reference === 'string' && reference.length > 0) return reference
+      } catch {
+        /* no workspace service: fall through to the retention record */
+      }
       try {
         const snapshot = ctx.get('sessions')?.list?.getSnapshot?.()
         const byId = snapshot?.byId
@@ -796,28 +803,58 @@ window.__ModuleLoader__.load({
       const revision = createStore(0)
 
       /**
-       * Ask the Host to delete; leave a conversation that is about to disappear.
+       * Open a fresh conversation and give the previous one a moment to be let go.
        *
-       * The order matters: the Host refuses to delete a session a client still
-       * holds, so navigating first is what makes "delete the conversation I am
-       * reading" work at all. `startSession()` with no workspace opens a fresh
-       * conversation in the current one, which disposes the old agent.
+       * `startSession()` with no workspace picks the current one and replaces the
+       * main view, which is what releases the conversation the user was reading.
+       * @returns completion once the grace window has passed.
+       */
+      async function leaveCurrentSession() {
+        try {
+          ctx.get('uiWorkspace')?.startSession?.()
+        } catch {
+          /* a deployment without the workspace service simply does not navigate */
+        }
+        await new Promise((resolve) => setTimeout(resolve, LEAVE_GRACE_MS))
+      }
+
+      /**
+       * Ask the Host to delete, and report per id.
+       * @param ids - the sessions to delete.
+       * @returns one result per id.
+       */
+      async function postDelete(ids) {
+        const payload = await postIds('/api/delete', ids)
+        return Array.isArray(payload?.results) ? payload.results : []
+      }
+
+      /**
+       * Delete, moving off the conversation on screen first.
+       *
+       * Two things have to happen for "delete the conversation I am reading" to
+       * work: the client must navigate away (a live conversation is not deletable),
+       * and that has to happen *before* the Host is asked. Deleting a conversation
+       * that is not on screen needs no navigation at all — which is why the first
+       * pass only navigates when the target is the main view.
+       *
+       * A host that still reports `in-use` gets one retry after a forced
+       * navigation, so the user never has to be told "switch conversations first".
        * @param ids - the sessions to delete.
        * @returns a summary the dialog renders.
        */
       async function confirmDelete(ids) {
         const main = mainSessionId(ctx)
-        if (main !== undefined && ids.includes(main)) {
-          try {
-            ctx.get('uiWorkspace')?.startSession?.()
-          } catch {
-            /* a deployment without the workspace service keeps the Host's refusal */
-          }
-          await new Promise((resolve) => setTimeout(resolve, LEAVE_GRACE_MS))
+        if (main !== undefined && ids.includes(main)) await leaveCurrentSession()
+
+        let results = await postDelete(ids)
+        const refused = results.filter((result) => result.code === 'in-use').map((result) => result.id)
+        if (refused.length > 0) {
+          await leaveCurrentSession()
+          const retried = await postDelete(refused)
+          const byId = new Map(retried.map((result) => [result.id, result]))
+          results = results.map((result) => byId.get(result.id) ?? result)
         }
 
-        const payload = await postIds('/api/delete', ids)
-        const results = Array.isArray(payload?.results) ? payload.results : []
         const done = results.filter((result) => result.ok === true).length
         const failed = results.filter((result) => result.ok !== true)
 
