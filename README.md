@@ -114,7 +114,7 @@ HTTP 接口（都挂在 `/dsh-chat-manage` 下，只服务本机 web 端口）�
 | `POST` | `/api/delete` `{ ids }` | 删除，逐条返回结果 |
 | `POST` | `/api/restore` `{ ids }` | 取消归档 |
 
-批量删除单次上限 200 条；请求体上限 256 KB。
+批量删除单次上限 200 条；请求体上限 256 KB。两个 POST 必须声明 `content-type: application/json`，否则返回 415：浏览器能不经预检就发出 `text/plain` 的跨站请求，而这个前缀只服务本机端口，若不卡住这类请求，任意网页只要猜到端口就能删你的对话。
 
 ### 从 JSONL 到对话块
 
@@ -150,7 +150,7 @@ npm run layout    # 生成 dev/preview.html，用真实样式表看窄面板下�
 ```
 
 - `dev/smoke.mjs` — 纯逻辑单测（17 项）：id 规范化、内容折叠、标题提取与回退、注入上下文过滤、列表与 workspace 关联、截断、删除（含 running 拒绝、「仍在内存也照删」、「恢复后再归档」顺序、工件缺失清理）、恢复、服务缺失降级。
-- `dev/http.mjs` — 路由集成测试（10 项）：真起一个 `http.Server`，把插件挂上去，然后用 `fetch` 打四个路由。校验状态码、JSON 结构、`no-store` 头、空 id 与缺 id 的拒绝、配置项对预览窗口的约束，以及 fiber 释放后路由确实被卸载。
+- `dev/http.mjs` — 路由集成测试（12 项）：真起一个 `http.Server`，把插件挂上去，然后用 `fetch` 打四个路由。校验状态码、JSON 结构、`no-store` 头、空 id 与缺 id 的拒绝、配置项对预览窗口的约束、非 JSON 的 POST 被拒（防跨站删除），以及 fiber 释放后路由确实被卸载。
 - `dev/client-contract.mjs` — 浏览器半契约测试（8 项）：复现 shell 的加载方式，校验包名注册、三个 slot 的 id/order/label、菜单面能唤起弹层请求、设置面暴露的方法齐全，**组件用到的 `dcm-*` 类名与样式表里的规则必须一一对应**（反向也查：没有死 CSS），以及删除流程的两个顺序保证：**先导航再请求**、**被拒后自动开新对话重试一次**。
 - `dev/layout.mjs` — 排版夹具：把 `client.js` 里的样式表原样抽出来，按组件同样的 DOM 结构在 470px 宽度下渲染成 `dev/preview.html`。设置面板只有这么宽，列表挤爆过一次（标题列被压成 0、操作列溢出），这类问题看代码看不出来。
 

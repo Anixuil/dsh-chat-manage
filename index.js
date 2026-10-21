@@ -81,6 +81,14 @@ async function route(manager, req, res) {
       return
     }
     if (req.method === 'POST' && (path === '/api/delete' || path === '/api/restore')) {
+      // A browser can send a "simple" cross-origin POST with a text/plain body and
+      // no preflight at all. Requiring JSON forces a preflight, and this server
+      // answers none — so a random web page cannot reach a route that deletes
+      // conversations on localhost just by knowing the port.
+      if (!isJson(req)) {
+        send(res, 415, { ok: false, error: { code: 'unsupported-media-type', message: 'POST bodies must be application/json' } })
+        return
+      }
       const body = await readJson(req)
       const ids = normalizeIds(body?.ids)
       if (ids.length === 0) {
@@ -105,6 +113,20 @@ async function route(manager, req, res) {
       }
     }
   }
+}
+
+/**
+ * Whether a request carries a JSON body.
+ *
+ * The check is on the declared type, not the bytes: its job is to keep the request
+ * out of the browser's "simple request" category, which is the only way a foreign
+ * page could reach these routes without a preflight.
+ * @param req - the Node request.
+ * @returns true when the content type is application/json.
+ */
+function isJson(req) {
+  const type = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
+  return type === 'application/json'
 }
 
 /**

@@ -333,6 +333,27 @@ test('POST /api/delete refuses an empty id list', async () => {
   }
 })
 
+test('a POST that is not declared as JSON is refused before it can act', async () => {
+  const fx = await fixture('dcm-http-csrf-')
+  const server = await boot({ persistence: fakePersistence(fx.root, fx.store), registry: fx.registry, live: { get: () => undefined } })
+  try {
+    // Browsers send this shape without a preflight, so accepting it would let any
+    // page on the machine delete conversations by guessing the port.
+    const response = await fetch(`${server.base}${PREFIX}/api/delete`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ ids: ['session-a'] }),
+    })
+    assert.equal(response.status, 415)
+    assert.equal((await response.json()).error.code, 'unsupported-media-type')
+    assert.equal(await exists(fx.dir), true, 'nothing was removed')
+    assert.deepEqual(fx.registry.archivedSessionIds, ['session-a'])
+  } finally {
+    await server.close()
+    await rm(fx.root, { recursive: true, force: true })
+  }
+})
+
 test('POST /api/restore un-archives without deleting', async () => {
   const fx = await fixture('dcm-http-restore-')
   const server = await boot({ persistence: fakePersistence(fx.root, fx.store), registry: fx.registry, live: { get: () => undefined } })
