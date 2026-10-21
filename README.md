@@ -40,15 +40,47 @@ New-Item -ItemType Junction `
   -Target "D:\code\self\all\dsh-chat-manage"
 ```
 
-### 从 npm / tarball
+### 用 dsh CLI（推荐，两种等价来源）
 
-```bash
-npm pack                 # 生成 dsh-chat-manage-0.1.0.tgz
+桌面端自带 CLI，不在 PATH 里，用全路径（或加进 PATH）：
+
+```
+C:\Users\<你>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd
 ```
 
-把它装进 profile 的 `node_modules`，同样在 `dsh.profile.bundles` 里加上 `"dsh-chat-manage"` 即可。
+```bash
+# 从 npm（发布后）—— 设置里「添加插件」里填的就是这个：dsh-chat-manage
+dsh plugin --profile desktop add dsh-chat-manage
 
-**改完必须重启 DSH Desktop**：Host 半的 Loader 行和浏览器半的 `client.js` 都只在启动时加载。
+# 从 GitHub 源码 —— 本包没有构建步骤，不需要 prepare / allowBuilds
+dsh plugin --profile desktop add github:Anixuil/dsh-chat-manage
+
+# 从本地 tarball（离线或内部分发）
+npm pack                                                  # → dsh-chat-manage-0.1.2.tgz
+dsh plugin --profile desktop add ./dsh-chat-manage-0.1.2.tgz
+
+# 从本地目录（开发调试，等价于上面的 link: 方式，改代码即时生效）
+dsh plugin --profile desktop add D:/code/self/all/dsh-chat-manage
+
+# 卸载
+dsh plugin --profile desktop remove dsh-chat-manage
+```
+
+`--profile desktop` 是桌面端；Web 端换成 `--profile web`。`add` 会自己写入 `dsh.profile.bundles`，不需要手改 `cordis.patch.yml`。
+
+```bash
+dsh plugin --profile desktop list        # 确认装到了哪个 profile、什么来源
+```
+
+### 从 tarball 手工安装
+
+```bash
+npm pack                 # 生成 dsh-chat-manage-0.1.2.tgz
+```
+
+把它装进 profile 的 `node_modules`，并在 `dsh.profile.bundles` 里加上 `"dsh-chat-manage"`；或者直接交给上面的 `dsh plugin add`。
+
+**装完必须完全退出再打开 DSH Desktop**：Host 半的 Loader 行和浏览器半的 `client.js` 都只在启动时加载。
 
 ## 使用
 
