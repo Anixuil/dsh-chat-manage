@@ -16,6 +16,18 @@ DSH 支持「归档对话」，但归档之后这些对话就再也找不到入�
 
 插件是普通 npm 包，通过 profile 的 `dsh.profile.bundles` 挂进桌面端。
 
+### 官方「添加插件」输入框
+
+设置 → 插件 → **添加插件**。输入框的标签是「包名或地址」，所以除了包名也收地址形式。往里填：
+
+```
+dsh-chat-manage                                    # 发布到 npm 之后（最稳）
+github:Anixuil/dsh-chat-manage                     # 直接从仓库装
+git+https://github.com/Anixuil/dsh-chat-manage.git # 完整 git 地址
+```
+
+确认弹窗里，git 类会显示成 `[git]`、URL 类显示成 `[url]`、本地路径显示成 `[path-or-other]`——那是它把来源做了脱敏，不是报错。**本包没有构建步骤**，所以走 GitHub 也不会被 pnpm 的 `allowBuilds` 卡住。本地路径（如 `D:\…\dsh-chat-manage-0.1.2.tgz`）被归到 `[path-or-other]`，官方没承诺支持，要装本地请用下面的 CLI。
+
 ### 本地目录（开发用）
 
 ```jsonc
