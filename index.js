@@ -40,10 +40,16 @@ export function apply(ctx, config) {
     transcriptBlocks: config?.transcriptBlocks,
     listCacheSeconds: config?.listCacheSeconds,
     releaseWaitMs: config?.releaseWaitMs,
+    tombstones: config?.tombstones,
   }
 
   ctx.inject(['webServer'], (webCtx) => {
     const manager = createSessionManager(webCtx, options)
+    // One pass per Host start: a session hidden by a delete in the previous run
+    // is gone from the store now, so its archive entry can be released. Fire and
+    // forget — a sweep that cannot reach a service simply tries again on the
+    // next list or delete.
+    void manager.sweep().catch(() => {})
     const dispose = webCtx.webServer.register({
       kind: 'prefix',
       path: PREFIX,

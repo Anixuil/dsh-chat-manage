@@ -21,6 +21,11 @@ import { join } from 'node:path'
 
 import { apply, PREFIX } from '../index.js'
 
+// The plugin resolves its own bookkeeping paths from `$DSH_HOME`; a scratch
+// directory keeps every route test off the real profile.
+process.env.DSH_HOME = await mkdtemp(join(tmpdir(), 'dcm-http-home-'))
+const TOMBSTONES = join(process.env.DSH_HOME, 'chat-manage', 'tombstones.json')
+
 const cases = []
 function test(name, body) {
   cases.push({ name, body })
@@ -70,6 +75,9 @@ function fakeRegistry(archivedSessionIds, workspaces) {
   return {
     archivedSessionIds,
     list: () => entities,
+    async archiveSession(id) {
+      if (!this.archivedSessionIds.includes(id)) this.archivedSessionIds.push(id)
+    },
     async unarchiveSession(id) {
       const index = this.archivedSessionIds.indexOf(id)
       if (index >= 0) this.archivedSessionIds.splice(index, 1)
@@ -308,7 +316,9 @@ test('POST /api/delete goes ahead while the Host still holds the session', async
     const body = await response.json()
     assert.equal(body.results[0].ok, true, 'a materialized session is not an open one')
     assert.equal(body.results[0].live, true, 'the caller can tell it outlived the grace window')
+    assert.equal(body.results[0].hidden, true, 'a live row is hidden instead of left in 未分组')
     assert.equal(await exists(fx.dir), false)
+    assert.deepEqual(fx.registry.archivedSessionIds, ['session-a'], 'archiving is the hide')
   } finally {
     await server.close()
     await rm(fx.root, { recursive: true, force: true })
@@ -414,6 +424,7 @@ test('disposing the fiber unmounts the prefix', async () => {
 let failed = 0
 for (const { name, body } of cases) {
   try {
+    await rm(TOMBSTONES, { force: true })
     await body()
     console.log(`ok   ${name}`)
   } catch (error) {

@@ -10,14 +10,27 @@
  * one-way door for the user.
  *
  * This module is the missing maintenance layer. It reads the archive set and the
- * session headers through the official services, and it deletes by removing the
- * artifact plus every registry reference to it, in that order of authority:
+ * session headers through the official services, and it deletes in one order
+ * only — artifact first, accounting after:
  *
- *   1. refuse while a client still holds the session (a live agent would write
- *      the log back after we removed it),
- *   2. refuse while the session reports running work,
- *   3. drop the registry accounting (workspace slot, archive set, pin set),
- *   4. remove the artifact directory the backend points at.
+ *   1. refuse while the session reports running work,
+ *   2. remove the artifact the backend points at, and verify it is gone,
+ *   3. drop the pin and any archive entry the user had set,
+ *   4. if the Host still holds the session in memory, archive it so the session
+ *      list — which unions stored records with *live* sessions — stops showing
+ *      a row whose log no longer exists,
+ *   5. give up the workspace slot, last, so the sidebar never renders the id as
+ *      an unaccounted row.
+ *
+ * Step 4 is the difference between a delete and a ghost. A live session is not
+ * reclaimable from a plugin (the store's detach closure belongs to the fiber
+ * that created it, and nothing in the API tears an idle agent down), so removing
+ * the log alone leaves `session.list` reporting the id forever. With no
+ * workspace owning it any more, that row surfaces under 未分组 and every later
+ * delete is a silent no-op, because there is nothing left to remove. Archiving
+ * hides it from every grouping surface, and the id is written to a tombstone
+ * file so a later sweep can drop that archive entry once the session is really
+ * gone (a Host restart).
  *
  * Everything is addressed by the session id; nothing here guesses at paths when
  * the backend can name them itself.
@@ -26,7 +39,7 @@
  * Harness packages present and can be unit-tested from plain Node.
  */
 
-import { readdir, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -57,6 +70,62 @@ const TOOL_HINT_LIMIT = 160
 function dshHome() {
   const fromEnv = process.env?.DSH_HOME
   return typeof fromEnv === 'string' && fromEnv.trim().length > 0 ? fromEnv : join(homedir(), '.dsh')
+}
+
+/** Folder under the DSH home that holds this plugin's own bookkeeping. */
+const STATE_DIR = 'chat-manage'
+
+/** File holding the ids this plugin archived only to hide a log it deleted. */
+const TOMBSTONE_FILE = 'tombstones.json'
+
+/**
+ * Where the tombstone set lives by default.
+ * @returns an absolute path under the DSH home.
+ */
+function defaultTombstonePath() {
+  return join(dshHome(), STATE_DIR, TOMBSTONE_FILE)
+}
+
+/**
+ * Read the tombstone set.
+ *
+ * A missing or unreadable file means "no tombstones": this is bookkeeping that
+ * may only ever shrink a hidden set, so failing open is safe and failing the
+ * caller over a stray byte is not.
+ * @param path - the tombstone file.
+ * @returns the ids, never null.
+ */
+async function readTombstones(path) {
+  let raw
+  try {
+    raw = await readFile(path, 'utf8')
+  } catch {
+    return new Set()
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return new Set()
+  }
+  const ids = Array.isArray(parsed?.ids) ? parsed.ids : []
+  return new Set(ids.filter((id) => typeof id === 'string' && id.length > 0))
+}
+
+/**
+ * Replace the tombstone set, atomically and without ever throwing.
+ * @param path - the tombstone file.
+ * @param ids - the ids to keep.
+ */
+async function writeTombstones(path, ids) {
+  try {
+    await mkdir(dirname(path), { recursive: true })
+    const temporary = `${path}.tmp`
+    await writeFile(temporary, `${JSON.stringify({ ids: [...ids] }, null, 2)}\n`, 'utf8')
+    await rename(temporary, path)
+  } catch {
+    /* the delete itself already succeeded; losing the sweep hint is not fatal */
+  }
 }
 
 /**
@@ -274,6 +343,9 @@ export function createSessionManager(ctx, options = {}) {
   const transcriptBlocks = positiveInt(options.transcriptBlocks, DEFAULT_TRANSCRIPT_BLOCKS)
   const cacheMs = positiveInt(options.listCacheSeconds, 15) * 1000
   const releaseWaitMs = positiveInt(options.releaseWaitMs, 2500)
+  const tombstonePath = typeof options.tombstones === 'string' && options.tombstones.trim().length > 0
+    ? options.tombstones.trim()
+    : defaultTombstonePath()
 
   /** Per-session metadata memo, invalidated by the backend's own revision. */
   const cache = new Map()
@@ -402,7 +474,11 @@ export function createSessionManager(ctx, options = {}) {
     if (persistence === undefined) {
       return { ok: false, error: { code: 'no-persistence', message: 'session persistence is not mounted' }, archived: [], workspaces: [] }
     }
-    const archivedIds = Array.isArray(registry?.archivedSessionIds) ? [...registry.archivedSessionIds].reverse() : []
+    await sweepTombstones()
+    const tombstones = await readTombstones(tombstonePath)
+    const archivedIds = Array.isArray(registry?.archivedSessionIds)
+      ? [...registry.archivedSessionIds].reverse().filter((rawId) => !tombstones.has(String(rawId)))
+      : []
     const workspaces = (registry?.list?.() ?? []).map((entity) => ({
       workspaceId: String(entity.id),
       title: typeof entity.title === 'string' ? entity.title : '',
@@ -556,7 +632,127 @@ export function createSessionManager(ctx, options = {}) {
   }
 
   /**
-   * Delete one session: registry references first, artifact second.
+   * Whether any of these paths is still on disk.
+   * @param paths - absolute paths.
+   * @returns true when at least one survived removal.
+   */
+  async function anyExists(paths) {
+    for (const path of paths) {
+      try {
+        await stat(path)
+        return true
+      } catch {
+        /* ENOENT is the answer we want */
+      }
+    }
+    return false
+  }
+
+  /**
+   * Remove every artifact path, retrying the failures Windows produces when a
+   * handle is still open. A short append window is transient; a session that
+   * keeps writing is not, and the caller must hear about that.
+   *
+   * `rm` is not trusted on its own: `force` swallows a missing file but says
+   * nothing about a directory it could not empty, so every attempt is verified
+   * against the filesystem rather than the backend's view of it.
+   * @param paths - the paths `artifactPaths` returned.
+   * @returns undefined on success, otherwise the last failure message.
+   */
+  async function removeArtifacts(paths) {
+    if (paths.length === 0) return undefined
+    let lastError
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      lastError = undefined
+      for (const path of paths) {
+        try {
+          await rm(path, { recursive: true, force: true })
+        } catch (error) {
+          lastError = error
+        }
+      }
+      if (lastError === undefined && !await anyExists(paths)) return undefined
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)))
+    }
+    return lastError !== undefined
+      ? describeError(lastError)
+      : `the stored log is still on disk (${paths.join(', ')})`
+  }
+
+  /**
+   * Hide a session whose log is gone but whose object is still live.
+   *
+   * The archive set is the only lever a plugin has: archiving hides an id from
+   * every grouping surface without tearing anything down, and it is what stops
+   * `session.list` from surfacing a row with no artifact behind it. The id is
+   * remembered so `sweepTombstones` can drop the entry once the session is no
+   * longer live.
+   * @param id - the session id.
+   * @param registry - the workspace registry.
+   * @returns whether the id is now hidden.
+   */
+  async function hideLive(id, registry) {
+    if (typeof registry?.archiveSession !== 'function') return false
+    try {
+      await registry.archiveSession(id)
+    } catch {
+      return false
+    }
+    const ids = await readTombstones(tombstonePath)
+    ids.add(id)
+    await writeTombstones(tombstonePath, ids)
+    return true
+  }
+
+  /**
+   * Drop archive entries this plugin created only to hide a deleted log.
+   *
+   * A tombstoned id stays archived for exactly as long as its session is live:
+   * that is what hides the ghost. Once the session is gone (typically after a
+   * Host restart) the entry has no purpose and no log, so the archive set is
+   * returned to the state the user left it in.
+   * @returns how many ids were released.
+   */
+  async function sweepTombstones() {
+    const ids = await readTombstones(tombstonePath)
+    if (ids.size === 0) return 0
+    const { registry, persistence, live } = services()
+    // Without every service the sweep cannot tell "gone" from "not looked at
+    // yet", and releasing an entry it cannot re-archive would strand it, so an
+    // incomplete mount simply leaves the tombstones for a later pass.
+    if (persistence === undefined || live === undefined || typeof registry?.unarchiveSession !== 'function') return 0
+    let swept = 0
+    for (const id of [...ids]) {
+      let held = false
+      try {
+        held = live?.get?.(id) !== undefined
+      } catch {
+        held = true
+      }
+      if (held) continue
+      let stored = true
+      try {
+        stored = (await persistence.stat(id)) !== undefined
+      } catch {
+        stored = true
+      }
+      if (stored) continue
+      if (typeof registry?.unarchiveSession === 'function') {
+        try {
+          await registry.unarchiveSession(id)
+        } catch {
+          continue
+        }
+      }
+      ids.delete(id)
+      swept += 1
+    }
+    if (swept > 0) await writeTombstones(tombstonePath, ids)
+    return swept
+  }
+
+  /**
+   * Delete one session: artifact first, registry accounting after it is gone.
    * @param id - the session id.
    * @returns the per-session outcome.
    */
@@ -568,8 +764,9 @@ export function createSessionManager(ctx, options = {}) {
     if (activity.length > 0) {
       return { id, ok: false, code: 'running', message: 'this conversation is still running; stop it before deleting' }
     }
-    // Best effort, never a refusal: see `waitReleased`. `live` in the result only
-    // tells the caller the session object outlived the grace window.
+    // Best effort, never a refusal: see `waitReleased`. The result only tells the
+    // caller whether the session object outlived the grace window, which decides
+    // whether the row has to be hidden rather than simply disappearing.
     const released = await waitReleased(id)
 
     let header
@@ -579,24 +776,39 @@ export function createSessionManager(ctx, options = {}) {
       header = undefined
     }
 
-    // Registry accounting goes first: if the artifact removal fails afterwards the
-    // conversation is merely un-archived and still deletable, which is a state the
-    // user can see and retry. The reverse order would leave a dangling id in the
-    // archive set that no surface can ever clear.
+    // The artifact goes first, and only when it is really gone does the
+    // accounting move. The old order was the other way round, which is what made
+    // a failed removal leave an ungrouped row with nothing behind it.
+    const paths = await artifactPaths(persistence, header, id)
+    const failure = await removeArtifacts(paths)
+    if (failure !== undefined) {
+      return { id, ok: false, code: 'locked', message: failure }
+    }
+
+    // Accounting comes after the log is gone. Drop whatever the user had set up
+    // (an archive entry, a pin) first, then hide a still-live row, and only then
+    // give up the workspace slot: hiding before detaching means the sidebar never
+    // renders the id as an unaccounted row, not even for one frame.
+    if (typeof registry?.unarchiveSession === 'function') await registry.unarchiveSession(id)
+    if (typeof registry?.unpinSession === 'function') await registry.unpinSession(id)
+    if (!released && !await hideLive(id, registry)) {
+      return {
+        id,
+        ok: false,
+        code: 'ghost',
+        message: 'the stored log was deleted, but this conversation is still held in memory; restart DeepSeek Harness to clear the row',
+        removed: paths.length,
+      }
+    }
     for (const entity of registry?.list?.() ?? []) {
       if (!entity.sessionIds.includes(id)) continue
       await entity.detachSession(id)
     }
-    if (typeof registry?.unarchiveSession === 'function') await registry.unarchiveSession(id)
-    if (typeof registry?.unpinSession === 'function') await registry.unpinSession(id)
-
-    const paths = await artifactPaths(persistence, header, id)
-    for (const path of paths) {
-      await rm(path, { recursive: true, force: true })
-    }
     cache.delete(id)
 
-    return released ? { id, ok: true, removed: paths.length } : { id, ok: true, removed: paths.length, live: true }
+    return released
+      ? { id, ok: true, removed: paths.length }
+      : { id, ok: true, removed: paths.length, live: true, hidden: true }
   }
 
   /**
@@ -605,6 +817,7 @@ export function createSessionManager(ctx, options = {}) {
    * @returns one outcome per id.
    */
   async function remove(ids) {
+    await sweepTombstones()
     const results = []
     for (const id of ids) {
       try {
@@ -626,20 +839,24 @@ export function createSessionManager(ctx, options = {}) {
     if (typeof registry?.unarchiveSession !== 'function') {
       return ids.map((id) => ({ id, ok: false, code: 'no-registry', message: 'workspace registry is not mounted' }))
     }
+    const tombstones = await readTombstones(tombstonePath)
+    let released = 0
     const results = []
     for (const id of ids) {
       try {
         await registry.unarchiveSession(id)
         cache.delete(id)
+        if (tombstones.delete(id)) released += 1
         results.push({ id, ok: true })
       } catch (error) {
         results.push({ id, ok: false, code: 'error', message: describeError(error) })
       }
     }
+    if (released > 0) await writeTombstones(tombstonePath, tombstones)
     return results
   }
 
-  return { list, transcript, remove, restore }
+  return { list, transcript, remove, restore, sweep: sweepTombstones }
 }
 
 /**

@@ -97,6 +97,8 @@ window.__ModuleLoader__.load({
       confirmPartial: '{ok} 个已删除，{failed} 个未删除。',
       failureRunning: '这个对话正在运行，请先停止再删除。',
       failureInUse: '这个对话正在打开，请先切换到其他对话再删除。',
+      failureLocked: '对话文件还被占用（可能有进程正在写入），暂时删不掉，请稍后重试。',
+      failureGhost: '对话记录已删除，但它仍被进程占用；重启 DeepSeek Harness 后侧边栏那一行会自动消失。',
       failureGeneric: '删除失败：{msg}',
       restoreDone: '已恢复 {n} 个对话。',
       restoreFailed: '恢复失败：{msg}',
@@ -150,6 +152,8 @@ window.__ModuleLoader__.load({
       confirmPartial: '{ok} deleted, {failed} kept.',
       failureRunning: 'This conversation is still running; stop it first.',
       failureInUse: 'This conversation is still open; switch to another one first.',
+      failureLocked: 'The stored log is still held open — retry in a moment.',
+      failureGhost: 'The log was deleted, but the conversation is still held in memory; restart DeepSeek Harness to clear the row.',
       failureGeneric: 'Delete failed: {msg}',
       restoreDone: 'Restored {n} conversation(s).',
       restoreFailed: 'Restore failed: {msg}',
@@ -871,7 +875,11 @@ window.__ModuleLoader__.load({
           ? t('failureRunning')
           : first.code === 'in-use'
             ? t('failureInUse')
-            : format(t('failureGeneric'), { msg: first.message ?? first.code ?? 'error' })
+            : first.code === 'locked'
+              ? t('failureLocked')
+              : first.code === 'ghost'
+                ? t('failureGhost')
+                : format(t('failureGeneric'), { msg: first.message ?? first.code ?? 'error' })
         return {
           deleted: done,
           failed,

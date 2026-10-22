@@ -25,6 +25,12 @@ import {
   transcriptOf,
 } from '../sessions.js'
 
+// The Host half resolves its own bookkeeping paths from `$DSH_HOME`; pointing
+// that at a scratch directory keeps the suite off the real profile — and keeps
+// each run's tombstone file out of the next run's assertions.
+process.env.DSH_HOME = await mkdtemp(join(tmpdir(), 'dcm-home-'))
+const TOMBSTONES = join(process.env.DSH_HOME, 'chat-manage', 'tombstones.json')
+
 /** One-line test runner: name, then the body. */
 const cases = []
 function test(name, body) {
@@ -84,6 +90,9 @@ function fakeRegistry(archivedSessionIds, workspaces) {
     archivedSessionIds,
     detached,
     list: () => entities,
+    async archiveSession(id) {
+      if (!this.archivedSessionIds.includes(id)) this.archivedSessionIds.push(id)
+    },
     async unarchiveSession(id) {
       const index = this.archivedSessionIds.indexOf(id)
       if (index >= 0) this.archivedSessionIds.splice(index, 1)
@@ -340,25 +349,80 @@ test('delete removes the artifact and every registry reference', async () => {
   }
 })
 
-test('delete goes ahead while the Host still holds the session', async () => {
+test('delete hides a live session instead of leaving an ungrouped ghost', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dcm-live-'))
   try {
     const id = 'session-live'
     const dir = await materialize(root, id)
     const store = new Map([['session-live', { header: { id, cwd: 'C:/w', createdAt: 1 }, events: [] }]])
-    const registry = fakeRegistry([id], [])
+    const registry = fakeRegistry([], [])
     const manager = createSessionManager(
-      fakeContext({ persistence: fakePersistence(root, store), registry, live: { get: () => ({ id }) } }),
+      fakeContext({ persistence: fakePersistence(root, store), registry, live: { get: (value) => (value === id ? { id } : undefined) } }),
       { releaseWaitMs: 120 },
     )
 
     // Being materialized in the Host's store is not the same as being open in a
     // view: refusing here is what made "I am not even reading it" undeletable.
+    // So the delete goes ahead — but the session list unions live sessions, so
+    // the row has to be hidden or it comes back under 未分组.
     const results = await manager.remove([id])
     assert.equal(results[0].ok, true)
     assert.equal(results[0].live, true, 'the caller learns the session outlived the grace window')
+    assert.equal(results[0].hidden, true, 'the row is hidden rather than left visible')
     assert.equal(await exists(dir), false, 'the artifact is gone all the same')
+    assert.deepEqual(registry.archivedSessionIds, [id], 'archiving is what hides a live row')
+    assert.deepEqual((await manager.list()).archived, [], 'the settings page does not list it back')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the ghost of a log deleted by an earlier build is cleared by deleting again', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dcm-ghost-live-'))
+  try {
+    // The state the old code left behind: no artifact, no workspace accounting,
+    // and a session object the Host never lets go of. This is the 未分组 row the
+    // user could not remove: the delete reported success and changed nothing.
+    const id = 'session-ghost'
+    const registry = fakeRegistry([], [{ workspaceId: 'ws-1', title: 'demo', path: 'C:/w', sessionIds: [] }])
+    const manager = createSessionManager(
+      fakeContext({ persistence: fakePersistence(root, new Map()), registry, live: { get: () => ({ id }) } }),
+      { releaseWaitMs: 50 },
+    )
+
+    const results = await manager.remove([id])
+    assert.equal(results[0].ok, true)
+    assert.equal(results[0].removed, 0, 'there is nothing left on disk to remove')
+    assert.equal(results[0].hidden, true)
+    assert.deepEqual(registry.archivedSessionIds, [id], 'the row is now hidden from the sidebar')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a tombstone is released once the Host stops holding the session', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dcm-sweep-'))
+  try {
+    const id = 'session-live'
+    await materialize(root, id)
+    const registry = fakeRegistry([id], [])
+    const live = { get: (value) => (value === id ? { id } : undefined) }
+    const first = createSessionManager(
+      fakeContext({ persistence: fakePersistence(root, new Map([[id, { header: { id, cwd: 'C:/w', createdAt: 1 }, events: [] }]])), registry, live }),
+      { releaseWaitMs: 50 },
+    )
+    assert.equal((await first.remove([id]))[0].hidden, true)
+    assert.deepEqual(registry.archivedSessionIds, [id])
+
+    // Same registry and disk, fresh process: nothing is live any more, so the
+    // entry that only existed to hide the ghost has done its job.
+    const restarted = createSessionManager(
+      fakeContext({ persistence: fakePersistence(root, new Map()), registry, live: { get: () => undefined } }),
+      { releaseWaitMs: 50 },
+    )
+    assert.equal(await restarted.sweep(), 1)
     assert.deepEqual(registry.archivedSessionIds, [])
+    assert.equal(await restarted.sweep(), 0, 'the tombstone is gone, not swept twice')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -437,6 +501,7 @@ test('a missing service is reported instead of thrown', async () => {
 let failed = 0
 for (const { name, body } of cases) {
   try {
+    await rm(TOMBSTONES, { force: true })
     await body()
     console.log(`ok   ${name}`)
   } catch (error) {

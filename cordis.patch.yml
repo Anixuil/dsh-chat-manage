@@ -12,6 +12,7 @@
 #   transcriptBlocks   how many log events one preview may render   (default 600)
 #   listCacheSeconds   how long one archived row's metadata is reused (default 15)
 #   releaseWaitMs      how long a delete waits for a live agent to let go (default 2500)
+#   tombstones         where the hidden-live-session ledger lives      (default ~/.dsh/chat-manage/tombstones.json)
 
 - insert:
     - id: chat-manage
