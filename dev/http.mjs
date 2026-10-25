@@ -36,13 +36,21 @@ function event(type, data, seq) {
   return { type, seq, time: 1_000 + seq, data }
 }
 
-/** Minimal persistence stand-in, backed by a real directory. */
-function fakePersistence(root, store) {
+/**
+ * Minimal persistence stand-in, backed by a real directory.
+ *
+ * `stat` answers only while the artifact is on disk, the way the JSONL backend
+ * does — a store entry without a directory is what a *never materialized*
+ * session looks like, and that shape has its own route test below.
+ */
+function fakePersistence(root, store, options = {}) {
+  const pending = options.pending ?? new Set()
   return {
     root,
     async stat(id) {
       const entry = store.get(id)
       if (entry === undefined) return undefined
+      if (!pending.has(id) && !await exists(join(root, 'project', id))) return undefined
       return { header: entry.header, revision: 'r1', sizeBytes: 128 }
     },
     async open(id) {
@@ -319,6 +327,43 @@ test('POST /api/delete goes ahead while the Host still holds the session', async
     assert.equal(body.results[0].hidden, true, 'a live row is hidden instead of left in 未分组')
     assert.equal(await exists(fx.dir), false)
     assert.deepEqual(fx.registry.archivedSessionIds, ['session-a'], 'archiving is the hide')
+  } finally {
+    await server.close()
+    await rm(fx.root, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/delete hides a session the backend lists but never wrote', async () => {
+  // The reported shape: 17 sessions on disk, 17 in workspace.json, and rows under
+  // 未分组 that exist nowhere on the filesystem — created-but-never-materialized
+  // sessions the backend keeps returning from its in-process tracker. There is
+  // nothing to `rm`, so the delete has to hide the row instead of claiming a
+  // removal it never made.
+  const fx = await fixture('dcm-http-pending-')
+  const id = 'session-pending'
+  const store = new Map([[id, { header: { id, cwd: 'C:/work/demo', createdAt: 300 }, events: [] }]])
+  const registry = fakeRegistry([], [{ workspaceId: 'ws-1', title: 'demo', path: 'C:/work/demo', sessionIds: [id] }])
+  const server = await boot(
+    {
+      persistence: fakePersistence(fx.root, store, { pending: new Set([id]) }),
+      registry,
+      live: { get: (value) => (value === id ? { id } : undefined) },
+    },
+    { releaseWaitMs: 40 },
+  )
+  try {
+    const body = await (await fetch(`${server.base}${PREFIX}/api/delete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ids: [id] }),
+    })).json()
+    assert.equal(body.results[0].ok, true)
+    assert.equal(body.results[0].removed, 0, 'nothing was ever on disk')
+    assert.equal(body.results[0].hidden, true)
+    assert.deepEqual(registry.archivedSessionIds, [id], 'archiving is what takes the row off the sidebar')
+
+    const listed = await (await fetch(`${server.base}${PREFIX}/api/list`)).json()
+    assert.equal(listed.archived.length, 0, 'and the settings page does not offer to restore it')
   } finally {
     await server.close()
     await rm(fx.root, { recursive: true, force: true })

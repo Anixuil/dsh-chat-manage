@@ -72,6 +72,22 @@ function fakePersistence(root, store) {
   }
 }
 
+/**
+ * A persistence stand-in that answers `stat` only while its artifact exists, the
+ * way the JSONL backend does. `fakePersistence` above answers from the map alone
+ * — which is exactly the shape of a *pending* session, not a materialized one.
+ */
+function materializedPersistence(root, store) {
+  const base = fakePersistence(root, store)
+  return {
+    ...base,
+    async stat(id) {
+      if (!(await exists(join(root, 'project', id)))) return undefined
+      return base.stat(id)
+    },
+  }
+}
+
 /** A registry stand-in holding one workspace and a mutable archive set. */
 function fakeRegistry(archivedSessionIds, workspaces) {
   const detached = []
@@ -98,6 +114,25 @@ function fakeRegistry(archivedSessionIds, workspaces) {
       if (index >= 0) this.archivedSessionIds.splice(index, 1)
     },
     async unpinSession() {},
+  }
+}
+
+/** A `sessions` store stand-in that supports the eviction pair a delete uses. */
+function fakeLiveStore(ids) {
+  const entries = new Map(ids.map((id) => [id, { id, session: { id }, disposed: false }]))
+  return {
+    disposed: [],
+    get: (id) => entries.get(id)?.session,
+    list: () => [...entries.values()].map((entry) => entry.session),
+    liveEntryFor(session) {
+      const entry = entries.get(session.id)
+      if (entry === undefined || entry.session !== session) throw new Error(`session "${session.id}" is not live in this store`)
+      return entry
+    },
+    detachEntered(entry) {
+      entries.delete(entry.id)
+      this.disposed.push(entry.id)
+    },
   }
 }
 
@@ -334,7 +369,7 @@ test('delete removes the artifact and every registry reference', async () => {
     const store = new Map([['session-del', { header: { id, cwd: 'C:/w', createdAt: 1 }, events: [] }]])
     const registry = fakeRegistry([id], [{ workspaceId: 'ws-1', title: 'demo', path: 'C:/w', sessionIds: [id] }])
     const manager = createSessionManager(
-      fakeContext({ persistence: fakePersistence(root, store), registry, live: { get: () => undefined } }),
+      fakeContext({ persistence: materializedPersistence(root, store), registry, live: { get: () => undefined } }),
       { releaseWaitMs: 50 },
     )
 
@@ -343,8 +378,7 @@ test('delete removes the artifact and every registry reference', async () => {
     assert.equal(await exists(dir), false, 'the artifact directory is gone')
     assert.deepEqual(registry.archivedSessionIds, [], 'the archive set no longer holds the id')
     assert.deepEqual(registry.detached, [{ workspaceId: 'ws-1', id }])
-    assert.deepEqual(store.has(id), true, 'the fake store is not the point: the file is')
-  } finally {
+    assert.deepEqual(store.has(id), true, 'the fake store is not the point: the file is')  } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
@@ -395,6 +429,60 @@ test('the ghost of a log deleted by an earlier build is cleared by deleting agai
     assert.equal(results[0].removed, 0, 'there is nothing left on disk to remove')
     assert.equal(results[0].hidden, true)
     assert.deepEqual(registry.archivedSessionIds, [id], 'the row is now hidden from the sidebar')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('delete evicts a resident session instead of archiving it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dcm-evict-'))
+  try {
+    const id = 'session-evict'
+    const dir = await materialize(root, id)
+    const store = new Map([[id, { header: { id, cwd: 'C:/w', createdAt: 1 }, events: [] }]])
+    const registry = fakeRegistry([], [])
+    const live = fakeLiveStore([id])
+    const manager = createSessionManager(
+      fakeContext({ persistence: materializedPersistence(root, store), registry, live }),
+      { releaseWaitMs: 60 },
+    )
+
+    const results = await manager.remove([id])
+    assert.equal(results[0].ok, true)
+    assert.equal(results[0].released, true, 'the session left the store')
+    assert.equal(results[0].hidden, undefined, 'nothing had to be archived')
+    assert.equal(await exists(dir), false)
+    assert.deepEqual(live.disposed, [id], 'the store was told to emit its disposal edge')
+    assert.equal(live.get(id), undefined, 'session.list no longer has a live row to union in')
+    assert.deepEqual(registry.archivedSessionIds, [], 'a clean delete leaves the archive set alone')
+    assert.deepEqual(await manager.list().then((payload) => payload.archived), [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a session the backend lists but never wrote is hidden, not silently "removed"', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dcm-pending-'))
+  try {
+    // The shape the JSONL backend reports for a created-but-never-materialized
+    // session: `stat()` answers with a header, `locate()` names a path that was
+    // never created, and `list()` keeps yielding it from its in-process tracker.
+    const id = 'session-pending'
+    const store = new Map([[id, { header: { id, cwd: 'C:/w', createdAt: 1 }, events: [] }]])
+    const registry = fakeRegistry([], [{ workspaceId: 'ws-1', title: 'demo', path: 'C:/w', sessionIds: [id] }])
+    const live = fakeLiveStore([id])
+    const manager = createSessionManager(
+      fakeContext({ persistence: fakePersistence(root, store), registry, live }),
+      { releaseWaitMs: 60 },
+    )
+
+    const results = await manager.remove([id])
+    assert.equal(results[0].ok, true)
+    assert.equal(results[0].removed, 0, 'there was never an artifact to remove')
+    assert.equal(results[0].hidden, true, 'the backend still lists it, so it has to be archived')
+    assert.deepEqual(registry.archivedSessionIds, [id])
+    assert.equal(live.get(id), undefined, 'and the resident object is taken out too')
+    assert.deepEqual(registry.detached, [{ workspaceId: 'ws-1', id }], 'accounting is released last')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

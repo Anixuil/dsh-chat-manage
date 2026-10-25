@@ -11,26 +11,27 @@
  *
  * This module is the missing maintenance layer. It reads the archive set and the
  * session headers through the official services, and it deletes in one order
- * only — artifact first, accounting after:
+ * only — artifact first, accounting last:
  *
  *   1. refuse while the session reports running work,
- *   2. remove the artifact the backend points at, and verify it is gone,
+ *   2. remove what the filesystem actually holds and verify it is gone,
  *   3. drop the pin and any archive entry the user had set,
- *   4. if the Host still holds the session in memory, archive it so the session
- *      list — which unions stored records with *live* sessions — stops showing
- *      a row whose log no longer exists,
+ *   4. make the row stop being listed: evict the resident session from the
+ *      store, and archive whatever still reports the id,
  *   5. give up the workspace slot, last, so the sidebar never renders the id as
  *      an unaccounted row.
  *
- * Step 4 is the difference between a delete and a ghost. A live session is not
- * reclaimable from a plugin (the store's detach closure belongs to the fiber
- * that created it, and nothing in the API tears an idle agent down), so removing
- * the log alone leaves `session.list` reporting the id forever. With no
- * workspace owning it any more, that row surfaces under 未分组 and every later
- * delete is a silent no-op, because there is nothing left to remove. Archiving
- * hides it from every grouping surface, and the id is written to a tombstone
- * file so a later sweep can drop that archive entry once the session is really
- * gone (a Host restart).
+ * Steps 2 and 4 are the difference between a delete and a ghost. `session.list`
+ * is the union of the persisted records with the *live* sessions, and the store
+ * keeps a session object until the process ends, so removing the log alone leaves
+ * the row on screen. Worse, the JSONL backend's `list()` also yields
+ * `tracker.pendingEntries()` — sessions created in this process that never
+ * reached disk. They have no artifact at all, so `rm` removes nothing while
+ * `stat()` still reports a header, which is how a delete can report success and
+ * change nothing. Hence: delete by what exists, then make sure nothing still
+ * lists the id — evicting the session when it is resident, archiving it when the
+ * backend keeps counting it, and recording that in a tombstone file so a later
+ * sweep can drop the archive entry once the id is really gone.
  *
  * Everything is addressed by the session id; nothing here guesses at paths when
  * the backend can name them itself.
@@ -632,20 +633,28 @@ export function createSessionManager(ctx, options = {}) {
   }
 
   /**
-   * Whether any of these paths is still on disk.
-   * @param paths - absolute paths.
-   * @returns true when at least one survived removal.
+   * The subset of `paths` that actually exists.
+   *
+   * A session can be listed by the Host while nothing is stored for it: the JSONL
+   * backend's `list()` also yields `tracker.pendingEntries()` — sessions created
+   * in this process that never reached disk — and `stat()` happily reports their
+   * header. `locate()` still names the path such a session *would* have, so a
+   * delete must check the filesystem instead of trusting the path list, or it
+   * reports a removal that never happened.
+   * @param paths - candidate paths.
+   * @returns the paths that exist right now.
    */
-  async function anyExists(paths) {
+  async function existingPaths(paths) {
+    const found = []
     for (const path of paths) {
       try {
         await stat(path)
-        return true
+        found.push(path)
       } catch {
-        /* ENOENT is the answer we want */
+        /* not on disk: nothing to remove here */
       }
     }
-    return false
+    return found
   }
 
   /**
@@ -656,7 +665,7 @@ export function createSessionManager(ctx, options = {}) {
    * `rm` is not trusted on its own: `force` swallows a missing file but says
    * nothing about a directory it could not empty, so every attempt is verified
    * against the filesystem rather than the backend's view of it.
-   * @param paths - the paths `artifactPaths` returned.
+   * @param paths - paths known to exist.
    * @returns undefined on success, otherwise the last failure message.
    */
   async function removeArtifacts(paths) {
@@ -671,12 +680,160 @@ export function createSessionManager(ctx, options = {}) {
           lastError = error
         }
       }
-      if (lastError === undefined && !await anyExists(paths)) return undefined
+      if (lastError === undefined && (await existingPaths(paths)).length === 0) return undefined
       await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)))
     }
     return lastError !== undefined
       ? describeError(lastError)
       : `the stored log is still on disk (${paths.join(', ')})`
+  }
+
+  /**
+   * Take a live session out of the Host's store.
+   *
+   * `session.list` unions stored records with `ctx.sessions.list()`, and a live
+   * session is kept for the whole process, so removing the log alone leaves the
+   * row on screen. The store exposes the exact pair its own detach closure uses:
+   * `liveEntryFor(session)` names the entry and `detachEntered(entry)` removes it
+   * (with its bookkeeping, and the `session/disposed` edge when it was announced).
+   * That is the only way a plugin can make the id stop being live.
+   * @param store - the `sessions` service.
+   * @param id - the session id.
+   * @returns whether the session left the store.
+   */
+  function evictLive(store, id) {
+    try {
+      const session = store?.get?.(id)
+      if (session === undefined) return false
+      if (typeof store.liveEntryFor !== 'function' || typeof store.detachEntered !== 'function') return false
+      const entry = store.liveEntryFor(session)
+      store.detachEntered(entry)
+      return store.get(id) === undefined
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * What still reports this id after its log was removed.
+   *
+   * Two independent sources can put a row back on screen with nothing behind it,
+   * and they need different treatment:
+   *
+   *   - `resident` — `ctx.sessions` still holds the session object. `session.list`
+   *     unions those in, and the store keeps them for the whole process. This one
+   *     can be evicted, which removes the row outright.
+   *   - `stored` — the backend itself still reports the id. The JSONL backend's
+   *     `list()` includes `tracker.pendingEntries()`: sessions created in this
+   *     process that never reached disk, whose `stat()` still returns a header and
+   *     whose `locate()` names a path that does not exist. Nothing can be removed
+   *     for them, so they can only be hidden.
+   * @param persistence - the persistence service.
+   * @param live - the `sessions` service.
+   * @param id - the session id.
+   * @returns which sources still know the id.
+   */
+  async function lingering(persistence, live, id) {
+    let resident = false
+    try {
+      resident = live?.get?.(id) !== undefined
+    } catch {
+      resident = true
+    }
+    let stored = false
+    let unreadable = false
+    try {
+      stored = (await persistence.stat(id)) !== undefined
+    } catch {
+      unreadable = true
+    }
+    return { resident, stored: stored || unreadable }
+  }
+
+  /**
+   * Delete one session: artifact first, registry accounting last.
+   * @param id - the session id.
+   * @returns the per-session outcome.
+   */
+  async function removeOne(id) {
+    const { registry, persistence, live } = services()
+    if (persistence === undefined) return { id, ok: false, code: 'no-persistence', message: 'session persistence is not mounted' }
+
+    const activity = await activityOf(id)
+    if (activity.length > 0) {
+      return { id, ok: false, code: 'running', message: 'this conversation is still running; stop it before deleting' }
+    }
+    // Best effort, never a refusal: see `waitReleased`. Its result only feeds the
+    // outcome, because a session the store keeps is no reason to refuse a delete.
+    const released = await waitReleased(id)
+
+    let header
+    try {
+      header = (await persistence.stat(id))?.header
+    } catch {
+      header = undefined
+    }
+
+    // The artifact goes first, and only when it is really gone does the
+    // accounting move. The old order was the other way round, which is what made
+    // a failed removal leave an ungrouped row with nothing behind it. `present`
+    // is what the filesystem actually holds — a never-materialized session names
+    // a path that was never created, and reporting that as removed is the lie the
+    // user saw as "删除成功，什么都没变".
+    const present = await existingPaths(await artifactPaths(persistence, header, id))
+    const failure = await removeArtifacts(present)
+    if (failure !== undefined) {
+      return { id, ok: false, code: 'locked', message: failure }
+    }
+
+    // Drop whatever the user had set up (an archive entry, a pin) before deciding
+    // how the row leaves the sidebar.
+    if (typeof registry?.unarchiveSession === 'function') await registry.unarchiveSession(id)
+    if (typeof registry?.unpinSession === 'function') await registry.unpinSession(id)
+
+    const { resident, stored } = await lingering(persistence, live, id)
+    let evicted = false
+    let hidden = false
+    if (resident || stored) {
+      if (stored) {
+        // The backend still counts it, so hiding is the only lever — and it has to
+        // happen while the session is still known to the registry, which is why
+        // the archive comes before the eviction.
+        hidden = await hideLive(id, registry)
+      } else {
+        // Only the resident object is left: taking it out of the store is the
+        // honest version of a delete, and it needs no archive bookkeeping.
+        evicted = evictLive(live, id)
+        if (!evicted) hidden = await hideLive(id, registry)
+      }
+      if (!evicted && !hidden) {
+        return {
+          id,
+          ok: false,
+          code: 'ghost',
+          message: 'the stored log was deleted, but this conversation is still held in memory and cannot be hidden; restart DeepSeek Harness to clear the row',
+          removed: present.length,
+        }
+      }
+      // A session evicted after being hidden would take the archive entry with it
+      // on the next sweep, which is exactly right; one that is still resident can
+      // write its log back, so make sure it cannot.
+      if (hidden && resident) evicted = evictLive(live, id)
+    }
+
+    // Accounting last: the id must never be unaccounted while it is still
+    // listable, or the sidebar renders it under 未分组.
+    for (const entity of registry?.list?.() ?? []) {
+      if (!entity.sessionIds.includes(id)) continue
+      await entity.detachSession(id)
+    }
+    cache.delete(id)
+
+    const result = { id, ok: true, removed: present.length }
+    if (!released) result.live = true
+    if (evicted) result.released = true
+    if (hidden) result.hidden = true
+    return result
   }
 
   /**
@@ -749,66 +906,6 @@ export function createSessionManager(ctx, options = {}) {
     }
     if (swept > 0) await writeTombstones(tombstonePath, ids)
     return swept
-  }
-
-  /**
-   * Delete one session: artifact first, registry accounting after it is gone.
-   * @param id - the session id.
-   * @returns the per-session outcome.
-   */
-  async function removeOne(id) {
-    const { registry, persistence } = services()
-    if (persistence === undefined) return { id, ok: false, code: 'no-persistence', message: 'session persistence is not mounted' }
-
-    const activity = await activityOf(id)
-    if (activity.length > 0) {
-      return { id, ok: false, code: 'running', message: 'this conversation is still running; stop it before deleting' }
-    }
-    // Best effort, never a refusal: see `waitReleased`. The result only tells the
-    // caller whether the session object outlived the grace window, which decides
-    // whether the row has to be hidden rather than simply disappearing.
-    const released = await waitReleased(id)
-
-    let header
-    try {
-      header = (await persistence.stat(id))?.header
-    } catch {
-      header = undefined
-    }
-
-    // The artifact goes first, and only when it is really gone does the
-    // accounting move. The old order was the other way round, which is what made
-    // a failed removal leave an ungrouped row with nothing behind it.
-    const paths = await artifactPaths(persistence, header, id)
-    const failure = await removeArtifacts(paths)
-    if (failure !== undefined) {
-      return { id, ok: false, code: 'locked', message: failure }
-    }
-
-    // Accounting comes after the log is gone. Drop whatever the user had set up
-    // (an archive entry, a pin) first, then hide a still-live row, and only then
-    // give up the workspace slot: hiding before detaching means the sidebar never
-    // renders the id as an unaccounted row, not even for one frame.
-    if (typeof registry?.unarchiveSession === 'function') await registry.unarchiveSession(id)
-    if (typeof registry?.unpinSession === 'function') await registry.unpinSession(id)
-    if (!released && !await hideLive(id, registry)) {
-      return {
-        id,
-        ok: false,
-        code: 'ghost',
-        message: 'the stored log was deleted, but this conversation is still held in memory; restart DeepSeek Harness to clear the row',
-        removed: paths.length,
-      }
-    }
-    for (const entity of registry?.list?.() ?? []) {
-      if (!entity.sessionIds.includes(id)) continue
-      await entity.detachSession(id)
-    }
-    cache.delete(id)
-
-    return released
-      ? { id, ok: true, removed: paths.length }
-      : { id, ok: true, removed: paths.length, live: true, hidden: true }
   }
 
   /**
